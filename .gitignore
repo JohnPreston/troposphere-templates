@@ -1,0 +1,5 @@
+*~
+*.pyc
+*pycache*
+*.zip
+.venv*

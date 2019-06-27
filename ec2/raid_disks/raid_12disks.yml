@@ -1,0 +1,314 @@
+Conditions:
+  DiskInitStopsCon: !Equals
+    - !Ref 'FailIfDiskInitFails'
+    - 'True'
+  KmsKeyCon: !Equals
+    - !Ref 'UseCacheDisk'
+    - 'True'
+Description: Simple template for EC2 instance with multiple Disks
+Metadata:
+  Author: https://github.com/johnpreston
+  Date: '2019-06-27T11:04:38.278817'
+Parameters:
+  CacheDiskSize:
+    MaxValue: 4069
+    MinValue: 8
+    Type: Number
+  CacheDiskType:
+    AllowedValues:
+      - gp2
+      - st1
+    Type: String
+  FailIfDiskInitFails:
+    AllowedValues:
+      - 'True'
+      - 'False'
+    Default: 'False'
+    Type: String
+  ImageId:
+    Type: AWS::EC2::Image::Id
+  InstanceAz:
+    Type: String
+  InstanceType:
+    AllowedValues:
+      - m5.16xlarge
+      - m5.8xlarge
+      - m5a.16xlarge
+      - m5a.8xlarge
+      - m5d.16xlarge
+      - m5d.8xlarge
+      - r5.16xlarge
+      - r5.8xlarge
+      - r5a.16xlarge
+      - r5a.8xlarge
+      - r5d.16xlarge
+      - r5d.8xlarge
+      - a1.2xlarge
+      - a1.4xlarge
+      - a1.large
+      - a1.medium
+      - a1.xlarge
+      - c1.medium
+      - c1.xlarge
+      - c3.2xlarge
+      - c3.4xlarge
+      - c3.8xlarge
+      - c3.large
+      - c3.xlarge
+      - c4.2xlarge
+      - c4.4xlarge
+      - c4.8xlarge
+      - c4.large
+      - c4.xlarge
+      - c5.12xlarge
+      - c5.18xlarge
+      - c5.24xlarge
+      - c5.2xlarge
+      - c5.4xlarge
+      - c5.9xlarge
+      - c5.large
+      - c5.metal
+      - c5.xlarge
+      - c5d.18xlarge
+      - c5d.2xlarge
+      - c5d.4xlarge
+      - c5d.9xlarge
+      - c5d.large
+      - c5d.xlarge
+      - c5n.18xlarge
+      - c5n.2xlarge
+      - c5n.4xlarge
+      - c5n.9xlarge
+      - c5n.large
+      - c5n.xlarge
+      - cc2.8xlarge
+      - cr1.8xlarge
+      - d2.2xlarge
+      - d2.4xlarge
+      - d2.8xlarge
+      - d2.xlarge
+      - f1.16xlarge
+      - f1.2xlarge
+      - f1.4xlarge
+      - g2.2xlarge
+      - g2.8xlarge
+      - g3.16xlarge
+      - g3.4xlarge
+      - g3.8xlarge
+      - g3s.xlarge
+      - h1.16xlarge
+      - h1.2xlarge
+      - h1.4xlarge
+      - h1.8xlarge
+      - hs1.8xlarge
+      - i2.2xlarge
+      - i2.4xlarge
+      - i2.8xlarge
+      - i2.xlarge
+      - i3.16xlarge
+      - i3.2xlarge
+      - i3.4xlarge
+      - i3.8xlarge
+      - i3.large
+      - i3.metal
+      - i3.xlarge
+      - i3en.12xlarge
+      - i3en.24xlarge
+      - i3en.2xlarge
+      - i3en.3xlarge
+      - i3en.6xlarge
+      - i3en.large
+    Type: String
+  KeyPairName:
+    Type: AWS::EC2::KeyPair::KeyName
+  KmsKeyId:
+    AllowedPattern: ((^default$)|([a-z0-9]{8})-([a-z0-9]{4})-([a-z0-9]{4})-([a-z0-9]{4})-([a-z0-9]{12}))
+    Default: default
+    Type: String
+  RaidDiskSize:
+    MaxValue: 4069
+    MinValue: 8
+    Type: Number
+  RaidDisksType:
+    AllowedValues:
+      - gp2
+      - st1
+    Type: String
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+  UseCacheDisk:
+    AllowedValues:
+      - 'True'
+      - 'False'
+    Default: 'True'
+    Type: String
+Resources:
+  CacheDisk0:
+    Condition: KmsKeyCon
+    Properties:
+      AvailabilityZone: !Ref 'InstanceAz'
+      Size: !Ref 'CacheDiskSize'
+      VolumeType: !Ref 'CacheDiskType'
+    Type: AWS::EC2::Volume
+  CacheDisk1:
+    Condition: KmsKeyCon
+    Properties:
+      AvailabilityZone: !Ref 'InstanceAz'
+      Size: !Ref 'CacheDiskSize'
+      VolumeType: !Ref 'CacheDiskType'
+    Type: AWS::EC2::Volume
+  CacheDisk2:
+    Condition: KmsKeyCon
+    Properties:
+      AvailabilityZone: !Ref 'InstanceAz'
+      Size: !Ref 'CacheDiskSize'
+      VolumeType: !Ref 'CacheDiskType'
+    Type: AWS::EC2::Volume
+  ComputeNode:
+    Metadata:
+      AWS::CloudFormation::Init:
+        configSets:
+          default:
+            - disksconfig
+        disksconfig:
+          commands:
+            '001-align-cache-disks':
+              command: for disk in `cut -f 1 -d '=' < /etc/cache.disks.config ; do
+                parted -a optimal -s $disk mklabel gpt mkpart 0% 100%; done
+            '002-align-raid-disks':
+              command: for disk in `cut -f 1 -d '=' < /etc/raid.disks.config ; do
+                parted -a optimal -s $disk mklabel gpt mkpart 0% 100%; done
+          files:
+            /etc/cache.disks.config:
+              content: !Join
+                - "\n"
+                - - !Sub '/dev/xvdd=${CacheDisk0}'
+                  - !Sub '/dev/xvde=${CacheDisk1}'
+                  - !Sub '/dev/xvdf=${CacheDisk2}'
+              group: root
+              mode: '644'
+              owner: root
+            /etc/raid.disks.config:
+              content: !Join
+                - "\n"
+                - - !Sub '/dev/xvdd=${RaidDisk0}'
+                  - !Sub '/dev/xvde=${RaidDisk1}'
+                  - !Sub '/dev/xvdf=${RaidDisk2}'
+                  - !Sub '/dev/xvdg=${RaidDisk3}'
+                  - !Sub '/dev/xvdh=${RaidDisk4}'
+                  - !Sub '/dev/xvdi=${RaidDisk5}'
+                  - !Sub '/dev/xvdj=${RaidDisk6}'
+                  - !Sub '/dev/xvdk=${RaidDisk7}'
+                  - !Sub '/dev/xvdl=${RaidDisk8}'
+              group: root
+              mode: '644'
+              owner: root
+          packages:
+            yum:
+              parted: []
+    Properties:
+      ImageId: !Ref 'ImageId'
+      InstanceType: !Ref 'InstanceType'
+      SubnetId: !Ref 'SubnetId'
+      UserData: !Base64
+        Fn::Join:
+          - "\n"
+          - - '#!/usr/bin/env bash'
+            - export PATH=$PATH:/opt/aws/bin
+            - cfn-init -v || yum install aws-cfn-bootstrap -y
+            - !Sub 'cfn-init --region ${AWS::Region} --resource ComputeNode --stack
+              ${AWS::StackId}'
+            - if [ $? -ne 0 ]; then
+            - !Sub 'cfn-signal -e 1 -r ''Failed to initialize'' ''${ConditionHandle}'''
+            - else
+            - !Sub 'cfn-signal -e 0 ''${ConditionHandle}'''
+            - fi
+            - '# EOF'
+      Volumes:
+        - Device: /dev/xvdd
+          VolumeId: !Ref 'CacheDisk0'
+        - Device: /dev/xvde
+          VolumeId: !Ref 'CacheDisk1'
+        - Device: /dev/xvdf
+          VolumeId: !Ref 'CacheDisk2'
+        - Device: /dev/xvdg
+          VolumeId: !Ref 'RaidDisk0'
+        - Device: /dev/xvdh
+          VolumeId: !Ref 'RaidDisk1'
+        - Device: /dev/xvdi
+          VolumeId: !Ref 'RaidDisk2'
+        - Device: /dev/xvdj
+          VolumeId: !Ref 'RaidDisk3'
+        - Device: /dev/xvdk
+          VolumeId: !Ref 'RaidDisk4'
+        - Device: /dev/xvdl
+          VolumeId: !Ref 'RaidDisk5'
+        - Device: /dev/xvdm
+          VolumeId: !Ref 'RaidDisk6'
+        - Device: /dev/xvdn
+          VolumeId: !Ref 'RaidDisk7'
+        - Device: /dev/xvdo
+          VolumeId: !Ref 'RaidDisk8'
+    Type: AWS::EC2::Instance
+  ConditionHandle:
+    Type: AWS::CloudFormation::WaitConditionHandle
+  RaidDisk0:
+    Properties:
+      AvailabilityZone: !Ref 'InstanceAz'
+      Size: !Ref 'RaidDiskSize'
+      VolumeType: !Ref 'CacheDiskType'
+    Type: AWS::EC2::Volume
+  RaidDisk1:
+    Properties:
+      AvailabilityZone: !Ref 'InstanceAz'
+      Size: !Ref 'RaidDiskSize'
+      VolumeType: !Ref 'CacheDiskType'
+    Type: AWS::EC2::Volume
+  RaidDisk2:
+    Properties:
+      AvailabilityZone: !Ref 'InstanceAz'
+      Size: !Ref 'RaidDiskSize'
+      VolumeType: !Ref 'CacheDiskType'
+    Type: AWS::EC2::Volume
+  RaidDisk3:
+    Properties:
+      AvailabilityZone: !Ref 'InstanceAz'
+      Size: !Ref 'RaidDiskSize'
+      VolumeType: !Ref 'CacheDiskType'
+    Type: AWS::EC2::Volume
+  RaidDisk4:
+    Properties:
+      AvailabilityZone: !Ref 'InstanceAz'
+      Size: !Ref 'RaidDiskSize'
+      VolumeType: !Ref 'CacheDiskType'
+    Type: AWS::EC2::Volume
+  RaidDisk5:
+    Properties:
+      AvailabilityZone: !Ref 'InstanceAz'
+      Size: !Ref 'RaidDiskSize'
+      VolumeType: !Ref 'CacheDiskType'
+    Type: AWS::EC2::Volume
+  RaidDisk6:
+    Properties:
+      AvailabilityZone: !Ref 'InstanceAz'
+      Size: !Ref 'RaidDiskSize'
+      VolumeType: !Ref 'CacheDiskType'
+    Type: AWS::EC2::Volume
+  RaidDisk7:
+    Properties:
+      AvailabilityZone: !Ref 'InstanceAz'
+      Size: !Ref 'RaidDiskSize'
+      VolumeType: !Ref 'CacheDiskType'
+    Type: AWS::EC2::Volume
+  RaidDisk8:
+    Properties:
+      AvailabilityZone: !Ref 'InstanceAz'
+      Size: !Ref 'RaidDiskSize'
+      VolumeType: !Ref 'CacheDiskType'
+    Type: AWS::EC2::Volume
+  WaitCondition:
+    Condition: DiskInitStopsCon
+    Properties:
+      Handle: !Ref 'ConditionHandle'
+      Timeout: 600
+    Type: AWS::CloudFormation::WaitCondition

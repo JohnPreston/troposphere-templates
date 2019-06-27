@@ -1,0 +1,42 @@
+[
+    {
+	"ParameterKey": "CacheDiskSize",
+	"ParameterValue": "256"
+    },
+    {
+	"ParameterKey": "CacheDiskType",
+	"ParameterValue": "gp2"
+    },
+    {
+	"ParameterKey": "ImageId",
+	"ParameterValue": "ami-0bbc25e23a7640b9b"
+    },
+    {
+	"ParameterKey": "InstanceAz",
+	"ParameterValue": "eu-west-1a"
+    },
+    {
+	"ParameterKey": "InstanceType",
+	"ParameterValue": "c5.large"
+    },
+    {
+	"ParameterKey": "KeyPairName",
+	"ParameterValue": "NAS-0"
+    },
+    {
+	"ParameterKey": "RaidDiskSize",
+	"ParameterValue": "2048"
+    },
+    {
+	"ParameterKey": "RaidDisksType",
+	"ParameterValue": "st1"
+    },
+    {
+	"ParameterKey": "SubnetId",
+	"ParameterValue": "subnet-09ae272b328c73756"
+    },
+    {
+	"ParameterKey": "UseCacheDisk",
+	"ParameterValue": "True"
+    }
+]
