@@ -136,7 +136,7 @@ DISK_INIT_FAILURE_STOP = TPL.add_parameter(Parameter(
         'True',
         'False'
     ],
-    Default='False'
+    Default='True'
 ))
 
 KEY_CON = TPL.add_condition('KmsKeyCon', Equals(Ref(ENCRYPTION_KEY_ID), 'default'))
@@ -184,6 +184,7 @@ INSTANCE = TPL.add_resource(Instance(
     INSTANCE_TITLE,
     InstanceType=Ref(INSTANCE_TYPE),
     ImageId=Ref(AMI_ID),
+    KeyName=Ref(KEY_PAIR),
     SubnetId=Ref(SUBNET_ID),
     Volumes=[
         MountPoint(
@@ -230,16 +231,8 @@ INSTANCE = TPL.add_resource(Instance(
                         'group': 'root',
                         'mode': '644',
                         'content': Join('\n', [
-                            Sub(f"/dev/xvd{alpha[count+3]}=${{{disk.title}}}") for  count, disk in enumerate(RAID_DISKS)
+                            Sub(f"/dev/xvd{alpha[count+7]}=${{{disk.title}}}") for  count, disk in enumerate(RAID_DISKS)
                         ])
-                    }
-                },
-                commands={
-                    '001-align-cache-disks': {
-                        'command': "for disk in `cut -f 1 -d '=' < /etc/cache.disks.config ; do parted -a optimal -s $disk mklabel gpt mkpart 0% 100%; done"
-                    },
-                    '002-align-raid-disks': {
-                        'command': "for disk in `cut -f 1 -d '=' < /etc/raid.disks.config ; do parted -a optimal -s $disk mklabel gpt mkpart 0% 100%; done"
                     }
                 }
             )
@@ -249,4 +242,3 @@ INSTANCE = TPL.add_resource(Instance(
 
 with open('raid_12disks.yml', 'w') as fd:
     fd.write(TPL.to_yaml())
-

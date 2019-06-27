@@ -8,7 +8,7 @@ Conditions:
 Description: Simple template for EC2 instance with multiple Disks
 Metadata:
   Author: https://github.com/johnpreston
-  Date: '2019-06-27T11:04:38.278817'
+  Date: '2019-06-27T22:50:44.809410'
 Parameters:
   CacheDiskSize:
     MaxValue: 4069
@@ -23,7 +23,7 @@ Parameters:
     AllowedValues:
       - 'True'
       - 'False'
-    Default: 'False'
+    Default: 'True'
     Type: String
   ImageId:
     Type: AWS::EC2::Image::Id
@@ -31,18 +31,7 @@ Parameters:
     Type: String
   InstanceType:
     AllowedValues:
-      - m5.16xlarge
-      - m5.8xlarge
-      - m5a.16xlarge
       - m5a.8xlarge
-      - m5d.16xlarge
-      - m5d.8xlarge
-      - r5.16xlarge
-      - r5.8xlarge
-      - r5a.16xlarge
-      - r5a.8xlarge
-      - r5d.16xlarge
-      - r5d.8xlarge
       - a1.2xlarge
       - a1.4xlarge
       - a1.large
@@ -118,6 +107,16 @@ Parameters:
       - i3en.3xlarge
       - i3en.6xlarge
       - i3en.large
+      - i3en.metal
+      - i3en.xlarge
+      - m1.large
+      - m1.medium
+      - m1.small
+      - m1.xlarge
+      - m2.2xlarge
+      - m2.4xlarge
+      - m2.xlarge
+      - m3.2xlarge
     Type: String
   KeyPairName:
     Type: AWS::EC2::KeyPair::KeyName
@@ -171,13 +170,6 @@ Resources:
           default:
             - disksconfig
         disksconfig:
-          commands:
-            '001-align-cache-disks':
-              command: for disk in `cut -f 1 -d '=' < /etc/cache.disks.config ; do
-                parted -a optimal -s $disk mklabel gpt mkpart 0% 100%; done
-            '002-align-raid-disks':
-              command: for disk in `cut -f 1 -d '=' < /etc/raid.disks.config ; do
-                parted -a optimal -s $disk mklabel gpt mkpart 0% 100%; done
           files:
             /etc/cache.disks.config:
               content: !Join
@@ -191,15 +183,15 @@ Resources:
             /etc/raid.disks.config:
               content: !Join
                 - "\n"
-                - - !Sub '/dev/xvdd=${RaidDisk0}'
-                  - !Sub '/dev/xvde=${RaidDisk1}'
-                  - !Sub '/dev/xvdf=${RaidDisk2}'
-                  - !Sub '/dev/xvdg=${RaidDisk3}'
-                  - !Sub '/dev/xvdh=${RaidDisk4}'
-                  - !Sub '/dev/xvdi=${RaidDisk5}'
-                  - !Sub '/dev/xvdj=${RaidDisk6}'
-                  - !Sub '/dev/xvdk=${RaidDisk7}'
-                  - !Sub '/dev/xvdl=${RaidDisk8}'
+                - - !Sub '/dev/xvdh=${RaidDisk0}'
+                  - !Sub '/dev/xvdi=${RaidDisk1}'
+                  - !Sub '/dev/xvdj=${RaidDisk2}'
+                  - !Sub '/dev/xvdk=${RaidDisk3}'
+                  - !Sub '/dev/xvdl=${RaidDisk4}'
+                  - !Sub '/dev/xvdm=${RaidDisk5}'
+                  - !Sub '/dev/xvdn=${RaidDisk6}'
+                  - !Sub '/dev/xvdo=${RaidDisk7}'
+                  - !Sub '/dev/xvdp=${RaidDisk8}'
               group: root
               mode: '644'
               owner: root
@@ -209,6 +201,7 @@ Resources:
     Properties:
       ImageId: !Ref 'ImageId'
       InstanceType: !Ref 'InstanceType'
+      KeyName: !Ref 'KeyPairName'
       SubnetId: !Ref 'SubnetId'
       UserData: !Base64
         Fn::Join:
