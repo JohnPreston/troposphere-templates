@@ -1,0 +1,990 @@
+---
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: >-
+  SAP ASE with R4 Instances
+  Version: 2017-01-23
+  Author: John Mille
+
+################################################################################
+#
+# Parameters
+#
+################################################################################
+
+Parameters:
+  AZ:
+    Description: >-
+      Availability zone the Stack will be create resources in
+    Type: AWS::EC2::AvailabilityZone::Name
+
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+
+  ImageId:
+    Description: >-
+      Image ID of the SUSE CSL latest image
+    Type: AWS::EC2::Image::Id
+    Default: ami-0cc5897f
+    AllowedPattern: "ami-[A-Za-z0-9]+"
+    ConstraintDescription: "Must match ami-[A-Za-z0-9]+ pattern"
+
+  SID:
+    Description: >-
+      SID the stack belongs to
+    Type: String
+    MinLength: 3
+    MaxLength: 3
+    AllowedPattern: "[A-Z]+"
+    ConstraintDescription: "Must match [A-Z]+ pattern"
+
+  InstanceType:
+    Type: String
+    Default: r4.large
+    AllowedValues:
+      - r4.large
+      - r4.xlarge
+      - r4.2xlarge
+      - r4.4xlarge
+      - r4.8xlarge
+
+  DBSize:
+    Description: >-
+      Total size in GB of the DB
+    Type: Number
+    AllowedValues:
+      - 1024
+      - 2048
+      - 3072
+      - 4096
+
+################################################################################
+#
+# Meta-Data
+#
+################################################################################
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "SAP ASE Settings"
+        Parameters:
+          - SID
+          - DBSize
+      - Label:
+          default: "EC2 Compute settings"
+        Parameters:
+          - InstanceType
+          - ImageId
+
+    ParameterLabels:
+      InstanceType:
+        default: "Specify the size of the EC2 Instance to run ASE"
+      DBSize:
+        default: "Specify the size of the DB for the ASE system"
+      SID:
+        default: "The 3 Letters SAP Identifier the ASE instance belongs to"
+
+################################################################################
+#
+# Conditions
+#
+################################################################################
+
+Conditions:
+  isSmallForBackup:
+    Fn::Or:
+      - Fn::Equals:
+          - !Ref InstanceType
+          - "r4.large"
+      - Fn::Equals:
+          - !Ref InstanceType
+          - "r4.xlarge"
+      - Fn::Equals:
+          - !Ref InstanceType
+          - "r4.2xlarge"
+
+  2Disks:
+    Fn::Or:
+      - Fn::Equals:
+          - !Ref DBSize
+          - 2048
+      - Fn::Equals:
+          - !Ref DBSize
+          - 3072
+      - Fn::Equals:
+          - !Ref DBSize
+          - 4096
+
+  3Disks:
+    Fn::Or:
+      - Fn::Equals:
+          - !Ref DBSize
+          - 3072
+      - Fn::Equals:
+          - !Ref DBSize
+          - 4096
+  4Disks:
+    Fn::Equals:
+      - !Ref DBSize
+      - 4096
+
+################################################################################
+#
+# Mappings
+#
+################################################################################
+
+Mappings:
+  TypeToCapacity:
+    r4.large:
+      RAM: 16
+      CpuCEnabled: False
+    r4.xlarge:
+      RAM: 32
+      CpuCEnabled: False
+    r4.2xlarge:
+      RAM: 64
+      CpuCEnabled: False
+    r4.4xlarge:
+      RAM: 128
+      CpuCEnabled: False
+    r4.8xlarge:
+      RAM: 256
+      CpuCEnabled: False
+    x1.16xlarge:
+      RAM: 1024
+      CpuCEnabled: True
+    x1.32xlarge:
+      RAM: 2048
+      CpuCEnabled: True
+
+  AseDisksSizes:
+    log:
+      "64": 16
+      "128": 32
+      "256": 64
+      "512": 128
+      "1024": 384
+      "2048": 640
+      "3072": 1024
+      "4096": 1280
+
+
+  sapPaths:
+
+    ### Regular disks ###
+
+    log:
+      path: /sybase/log
+      partitionType: lvm
+      fsType: xfs
+      fsFormatOptions: ""
+      ebsDisk: xvdz
+      ebsAttachDevice: /dev/sdk
+      snapOptions: "1 2"
+      mountOptions: relatime,inode64,nobarrier
+      sybaseIndex: 1
+
+    usrsap:
+      path: /usr/sap
+      ebsDisk: xvdx
+      partitionType: raw
+      fsType: xfs
+      fsFormatOptions: ""
+      ebsAttachDevice: /dev/sdm
+      mountOptions: defaults
+      snapOptions: "1 2"
+      staticSize: 128
+
+    sapmnt:
+      partitionType: raw
+      fsType: xfs
+      fsFormatOptions: ""
+      path: /sapmnt
+      ebsDisk: xvdt
+      ebsAttachDevice: /dev/sdo
+      mountOptions: defaults
+      snapOptions: "1 2"
+      staticSize: 128
+
+    backup:
+      partitionType: lvm
+      fsType: xfs
+      fsFormatOptions: ""
+      path: /backup
+      ebsDisk: xvdv
+      ebsAttachDevice: /dev/sdn
+      mountOptions: defaults
+      snapOptions: "1 2"
+
+    ### DATA disks ###
+
+    data1:
+      partitionType: lvm
+      fsType: xfs
+      fsFormatOptions: ""
+      path: /sybase/data
+      ebsDisk: xvdr
+      ebsAttachDevice: /dev/sdz
+      mountOptions: relatime,inode64
+      snapOptions: "0 1"
+      sybaseIndex: 1
+      staticSize: 1024
+
+    data2:
+      partitionType: lvm
+      fsType: xfs
+      fsFormatOptions: ""
+      path: /sybase/data
+      ebsDisk: xvdq
+      ebsAttachDevice: /dev/sdy
+      mountOptions: relatime,inode64
+      snapOptions: "0 1"
+      sybaseIndex: 2
+      staticSize: 1024
+
+    data3:
+      partitionType: lvm
+      fsType: xfs
+      fsFormatOptions: ""
+      path: /sybase/data
+      ebsDisk: xvdp
+      ebsAttachDevice: /dev/sdx
+      mountOptions: relatime,inode64
+      snapOptions: "0 1"
+      sybaseIndex: 3
+      staticSize: 1024
+
+    data4:
+      partitionType: lvm
+      fsType: xfs
+      fsFormatOptions: ""
+      path: /sybase/data
+      ebsDisk: xvdo
+      ebsAttachDevice: /dev/sdw
+      mountOptions: relatime,inode64
+      snapOptions: "0 1"
+      sybaseIndex: 4
+      staticSize: 1024
+
+  Factors:
+    Double:
+      "16": 32
+      "32": 64
+      "64": 128
+      "128": 256
+      "256": 512
+      "512": 1024
+      "1024": 2048
+      "2048": 4096
+      "4096": 8192
+    Quadruple:
+      "16": 64
+      "32": 128
+      "64": 256
+      "128": 512
+      "256": 1024
+      "512": 2048
+      "1024": 4096
+      "2048": 8192
+
+################################################################################
+#
+# Resources
+#
+################################################################################
+
+Resources:
+  ec2Ase:
+    Metadata:
+      AWS::CloudFormation::Init:
+
+        ########################################################################
+        #
+        # DISKS CONFIG ConfigSet
+        #
+
+        disksConfig:
+          files:
+            "/var/tmp/disks_config.yml":
+              owner: root
+              group: root
+              mode: 644
+              content:
+                Fn::Join:
+                  - "\n"
+                  - - "# LOG DISK"
+                    - Fn::Sub:
+                        - |
+                          - path: ${path}/${SID}/1
+                            fsType: ${fsType}
+                            fsFormatOptions: ${fsFormatOpts}
+                            mountOptions: ${mountOptions}
+                            snapOptions: ${snapOptions}
+                            partitionType: ${partitionType}
+                            ebsDisk: ${ebsDisk}
+                        - path: !FindInMap [sapPaths, log, path]
+                          fsType: !FindInMap [sapPaths, log, fsType]
+                          ebsDisk: !FindInMap [sapPaths, log, ebsDisk]
+                          partitionType: !FindInMap [sapPaths, log, partitionType]
+                          mountOptions: !FindInMap [sapPaths, log, mountOptions]
+                          snapOptions: !FindInMap [sapPaths, log, snapOptions]
+                          fsFormatOpts: !FindInMap [sapPaths, log, fsFormatOptions]
+
+                    - "# SAPMNT DISK"
+                    - Fn::Sub:
+                        - |
+                          - path: ${path}
+                            fsType: ${fsType}
+                            fsFormatOptions: ${fsFormatOpts}
+                            mountOptions: ${mountOptions}
+                            snapOptions: ${snapOptions}
+                            partitionType: ${partitionType}
+                            ebsDisk: ${ebsDisk}
+                        - path: !FindInMap [sapPaths, sapmnt, path]
+                          fsType: !FindInMap [sapPaths, sapmnt, fsType]
+                          ebsDisk: !FindInMap [sapPaths, sapmnt, ebsDisk]
+                          snapOptions: !FindInMap [sapPaths, sapmnt, snapOptions]
+                          mountOptions: !FindInMap [sapPaths, sapmnt, mountOptions]
+                          partitionType: !FindInMap [sapPaths, sapmnt, partitionType]
+                          fsFormatOpts: !FindInMap [sapPaths, sapmnt, fsFormatOptions]
+
+                    - "# USRSAP DISK"
+                    - Fn::Sub:
+                        - |
+                          - path: ${path}
+                            fsType: ${fsType}
+                            fsFormatOptions: ${fsFormatOpts}
+                            mountOptions: ${mountOptions}
+                            partitionType: ${partitionType}
+                            ebsDisk: ${ebsDisk}
+                        - path: !FindInMap [sapPaths, usrsap, path]
+                          fsType: !FindInMap [sapPaths, usrsap, fsType]
+                          ebsDisk: !FindInMap [sapPaths, usrsap, ebsDisk]
+                          partitionType: !FindInMap [sapPaths, usrsap, partitionType]
+                          mountOptions: !FindInMap [sapPaths, usrsap, mountOptions]
+                          fsFormatOpts: !FindInMap [sapPaths, usrsap, fsFormatOptions]
+
+                    - "# BACKUP DISK"
+                    - Fn::Sub:
+                        - |
+                          - path: ${path}
+                            fsType: ${fsType}
+                            fsFormatOptions: ${fsFormatOpts}
+                            mountOptions: ${mountOptions}
+                            snapOptions: ${snapOptions}
+                            partitionType: ${partitionType}
+                            ebsDisk: ${ebsDisk}
+                        - path: !FindInMap [sapPaths, backup, path]
+                          fsType: !FindInMap [sapPaths, backup, fsType]
+                          ebsDisk: !FindInMap [sapPaths, backup, ebsDisk]
+                          partitionType: !FindInMap [sapPaths, backup, partitionType]
+                          snapOptions: !FindInMap [sapPaths, backup, snapOptions]
+                          mountOptions: !FindInMap [sapPaths, backup, mountOptions]
+                          fsFormatOpts: !FindInMap [sapPaths, backup, fsFormatOptions]
+                    - "#EOF"
+                    - ""
+
+          commands:
+            0001-regular-disks:
+              command: "/usr/bin/python /var/tmp/parseDisks.py --disks-file /var/tmp/disks_config.yml --apply-config"
+
+
+
+        ########################################################################
+        #
+        # DATA DISK 1
+        #
+
+        dataDisk1Config:
+          files:
+            "/var/tmp/disks_data1.yml":
+              owner: root
+              group: root
+              mode: 644
+              content:
+                Fn::Join:
+                  - "\n"
+                  - - "# DATA1 DISK"
+                    - Fn::Sub:
+                        - |
+                          - path: ${path}/${SID}/${sybaseIndex}
+                            fsType: ${fsType}
+                            fsFormatOptions: ${fsFormatOpts}
+                            mountOptions: ${mountOptions}
+                            snapOptions: ${snapOptions}
+                            partitionType: ${partitionType}
+                            ebsDisk: ${ebsDisk}
+                        - path: !FindInMap [sapPaths, data1, path]
+                          fsType: !FindInMap [sapPaths, data1, fsType]
+                          ebsDisk: !FindInMap [sapPaths, data1, ebsDisk]
+                          sybaseIndex: !FindInMap [sapPaths, data1, sybaseIndex]
+                          snapOptions: !FindInMap [sapPaths, data1, snapOptions]
+                          mountOptions: !FindInMap [sapPaths, data1, mountOptions]
+                          partitionType: !FindInMap [sapPaths, data1, partitionType]
+                          fsFormatOpts: !FindInMap [sapPaths, data1, fsFormatOptions]
+                    - " # EOF "
+                    - ""
+
+          commands:
+            0001-configure-disk:
+              command: "/usr/bin/python /var/tmp/parseDisks.py --disks-file /var/tmp/disks_data1.yml --apply-config"
+
+
+        ########################################################################
+        #
+        # DATA DISK 2
+        #
+
+        dataDisk2Config:
+          files:
+            "/var/tmp/disks_data2.yml":
+              owner: root
+              group: root
+              mode: 644
+              content:
+                Fn::Join:
+                  - "\n"
+                  - - "# DATA DISK 2"
+                    - Fn::Sub:
+                        - |
+                          - path: ${path}/${SID}/${sybaseIndex}
+                            fsType: ${fsType}
+                            fsFormatOptions: ${fsFormatOpts}
+                            mountOptions: ${mountOptions}
+                            snapOptions: ${snapOptions}
+                            partitionType: ${partitionType}
+                            ebsDisk: ${ebsDisk}
+                        - path: !FindInMap [sapPaths, data2, path]
+                          fsType: !FindInMap [sapPaths, data2, fsType]
+                          ebsDisk: !FindInMap [sapPaths, data2, ebsDisk]
+                          sybaseIndex: !FindInMap [sapPaths, data2, sybaseIndex]
+                          snapOptions: !FindInMap [sapPaths, data2, snapOptions]
+                          mountOptions: !FindInMap [sapPaths, data2, mountOptions]
+                          partitionType: !FindInMap [sapPaths, data2, partitionType]
+                          fsFormatOpts: !FindInMap [sapPaths, data2, fsFormatOptions]
+                    - " # EOF "
+                    - ""
+
+        ##########################################
+
+          commands:
+            0001-configure-disks:
+              command: "/usr/bin/python /var/tmp/parseDisks.py --disks-file /var/tmp/disks_data2.yml --apply-config"
+
+        ########################################################################
+        #
+        # DATA DISK 3
+        #
+
+        dataDisk3Config:
+          files:
+            "/var/tmp/disks_data3.yml":
+              owner: root
+              group: root
+              mode: 644
+              content:
+                Fn::Join:
+                  - "\n"
+                  - - "# DATA DISK 3"
+                    - Fn::Sub:
+                        - |
+                          - path: ${path}/${SID}/${sybaseIndex}
+                            fsType: ${fsType}
+                            fsFormatOptions: ${fsFormatOpts}
+                            mountOptions: ${mountOptions}
+                            snapOptions: ${snapOptions}
+                            partitionType: ${partitionType}
+                            ebsDisk: ${ebsDisk}
+                        - path: !FindInMap [sapPaths, data3, path]
+                          fsType: !FindInMap [sapPaths, data3, fsType]
+                          ebsDisk: !FindInMap [sapPaths, data3, ebsDisk]
+                          sybaseIndex: !FindInMap [sapPaths, data3, sybaseIndex]
+                          snapOptions: !FindInMap [sapPaths, data3, snapOptions]
+                          mountOptions: !FindInMap [sapPaths, data3, mountOptions]
+                          partitionType: !FindInMap [sapPaths, data3, partitionType]
+                          fsFormatOpts: !FindInMap [sapPaths, data3, fsFormatOptions]
+                    - " # EOF "
+                    - ""
+
+        ##########################################
+
+          commands:
+            0001-regular disks:
+              command: "/usr/bin/python /var/tmp/parseDisks.py --disks-file /var/tmp/disks_data3.yml --apply-config"
+
+        ########################################################################
+        #
+        # DATA DISK 4
+        #
+
+        dataDisk4Config:
+          files:
+            "/var/tmp/disks_data4.yml":
+              owner: root
+              group: root
+              mode: 644
+              content:
+                Fn::Join:
+                  - "\n"
+                  - - "# DATA DISK 4"
+                    - Fn::Sub:
+                        - |
+                          - path: ${path}/${SID}/${sybaseIndex}
+                            fsType: ${fsType}
+                            fsFormatOptions: ${fsFormatOpts}
+                            mountOptions: ${mountOptions}
+                            partitionType: ${partitionType}
+                            snapOptions: ${snapOptions}
+                            ebsDisk: ${ebsDisk}
+                        - path: !FindInMap [sapPaths, data4, path]
+                          fsType: !FindInMap [sapPaths, data4, fsType]
+                          ebsDisk: !FindInMap [sapPaths, data4, ebsDisk]
+                          sybaseIndex: !FindInMap [sapPaths, data4, sybaseIndex]
+                          snapOptions: !FindInMap [sapPaths, data4, snapOptions]
+                          mountOptions: !FindInMap [sapPaths, data4, mountOptions]
+                          partitionType: !FindInMap [sapPaths, data4, partitionType]
+                          fsFormatOpts: !FindInMap [sapPaths, data4, fsFormatOptions]
+                    - " # EOF "
+                    - ""
+
+        ##########################################
+
+          commands:
+            0001-configure-disks:
+              command: "/usr/bin/python /var/tmp/parseDisks.py --disks-file /var/tmp/disks_data4.yml --apply-config"
+
+        ########################################################################
+
+        disksScripts:
+          files:
+            "/var/tmp/swapOn.sh":
+              owner: root
+              group: root
+              mode: 755
+              source: https://cf-templates-scripts.s3.amazonaws.com/swapOn.sh
+
+            "/var/tmp/waitForParted.sh":
+              owner: root
+              group: root
+              mode: 755
+              source: https://cf-templates-scripts.s3.amazonaws.com/waitForParted.sh
+
+            "/var/tmp/easyLv.sh":
+              owner: root
+              group: root
+              mode: 755
+              source: https://cf-templates-scripts.s3.amazonaws.com/easyLv.sh
+
+            "/var/tmp/partition_all_disks.sh":
+              owner: root
+              group: root
+              mode: 755
+              source: https://cf-templates-scripts.s3.amazonaws.com/partition_all_disks.sh
+
+            "/var/tmp/lvm_all_disks.sh":
+              owner: root
+              group: root
+              mode: 755
+              source: https://cf-templates-scripts.s3.amazonaws.com/lvm_all_disks.sh
+
+            "/var/tmp/extend_fstab.sh":
+              owner: root
+              group: root
+              mode: 755
+              source: https://cf-templates-scripts.s3.amazonaws.com/extend_fstab.sh
+
+            "/var/tmp/parseDisks.py":
+              owner: root
+              group: root
+              mode: 755
+              source: https://cf-templates-scripts.s3.amazonaws.com/parseDisks.py
+
+            "/var/tmp/detectDisk.py":
+              owner: root
+              group: root
+              mode: 755
+              source: https://cf-templates-scripts.s3.amazonaws.com/detectDisk.py
+
+        ########################################################################
+
+        mount:
+          commands:
+            9999-mount-all:
+              command: mount -a
+
+
+        ########################################################################
+
+        swapOnSdb:
+          commands:
+            0001-xvdb-remove-from-fstab:
+              command: "sed -i '/xvdb/d' /etc/fstab"
+            0002-partition-sdb:
+              command: "/bin/bash /var/tmp/swapOn.sh xvdb"
+              ignoreErrors: True
+
+        ########################################################################
+        #
+        # ConfigSets nesting
+        #
+
+        configSets:
+          lvmAse:
+            - disksScripts
+            - disksConfig
+            - dataDisk1Config
+            - Fn::If:
+                - 2Disks
+                - dataDisk2Config
+                - !Ref AWS::NoValue
+            - Fn::If:
+                - 3Disks
+                - dataDisk3Config
+                - !Ref AWS::NoValue
+            - Fn::If:
+                - 4Disks
+                - dataDisk4Config
+                - !Ref AWS::NoValue
+            - mount
+
+          default:
+            - mount
+
+    ############################################################################
+    #
+    # Properties
+    #
+
+    Type: "AWS::EC2::Instance"
+    DependsOn:
+      - ebsAseLog
+      - ebsAseBackup
+      - ebsAseUsrSap
+      - ebsAseSapMnt
+      - ebsAseData1
+    Properties:
+      SubnetId: !Ref SubnetId
+      SecurityGroupIds:
+        - sg-30980d56
+      EbsOptimized: True
+      KeyName: !Ref KeyName
+      ImageId: !Ref ImageId
+      InstanceType: !Ref InstanceType
+      UserData:
+        Fn::Base64:
+          Fn::Join:
+          - "\n"
+          - - "#!/bin/bash"
+            - ""
+            - "export PATH=$PATH:/usr/bin:/usr/local/sbin:/usr/local/bin:/opt/aws/bin"
+            - ""
+            - "ntpdate -u 0.europe.pool.ntp.org"
+            - ""
+            - "pip --version || curl https://bootstrap.pypa.io/get-pip.py | python"
+            - "pip install pip --upgrade"
+            - "pip install awscli --upgrade"
+            - "pip install boto3 --upgrade"
+            - "pip install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-latest.tar.gz"
+            - "find /usr/bin -name \"cfn-*\"  -exec  chmod +x {} +"
+            - ""
+            - "# RUN THE CONFIGSETS"
+            - Fn::Join:
+                - " "
+                - - Fn::Sub: "cfn-init --region ${AWS::Region} --stack ${AWS::StackName}"
+                  - "-r ec2Ase"
+                  - "&&"
+                  - Fn::Sub: "cfn-signal -e 0 '${WHInstanceInit}'"
+                  - "#||"
+                  - Fn::Sub: "cfn-signal -e 1 '${WHInstanceInit}'"
+                  - ""
+            - ""
+            - Fn::Join:
+                - " "
+                - - Fn::Sub: 'cfn-init --region ${AWS::Region} --stack ${AWS::StackName}'
+                  - "-r ec2Ase"
+                  - "-c lvmAse"
+                  - "&&"
+                  - Fn::Sub: "cfn-signal -e 0 '${WHDisksGo}'"
+                  - "#||"
+                  - Fn::Sub: "cfn-signal -e 1 '${WHDisksGo}'"
+            - ""
+
+
+  ######################################################################
+  # LOG DISK
+
+  ebsAseLog:
+    Type: AWS::EC2::Volume
+    Properties:
+      AvailabilityZone: !Ref AZ
+      AutoEnableIO: False
+      Encrypted: True
+      Size:
+        Fn::FindInMap:
+          - AseDisksSizes
+          - log
+          - !Ref DBSize
+      VolumeType: gp2
+
+  ######################################################################
+  # USR SAP DISK
+
+  ebsAseUsrSap:
+    Type: AWS::EC2::Volume
+    Properties:
+      AvailabilityZone: !Ref AZ
+      Encrypted: True
+      Size: !FindInMap [sapPaths, sapmnt, staticSize]
+      VolumeType: gp2
+
+  ######################################################################
+  # SAP Mnt DISK
+
+  ebsAseSapMnt:
+    Type: AWS::EC2::Volume
+    Properties:
+      AvailabilityZone: !Ref AZ
+      Encrypted: True
+      Size: !FindInMap [sapPaths, sapmnt, staticSize]
+      VolumeType: gp2
+
+  ######################################################################
+  # Backup DISK
+
+  ebsAseBackup:
+    Type: AWS::EC2::Volume
+    Properties:
+      AvailabilityZone: !Ref AZ
+      Encrypted: True
+      Size:
+        Fn::If:
+          - isSmallForBackup
+          - 512
+          - Fn::FindInMap:
+              - Factors
+              - Double
+              - Fn::FindInMap:
+                  - TypeToCapacity
+                  - !Ref InstanceType
+                  - RAM
+      VolumeType: sc1
+
+  ######################################################################
+  # SWAP DISK
+
+  ebsAseSwap:
+    Type: AWS::EC2::Volume
+    Properties:
+      AvailabilityZone: !Ref AZ
+      Encrypted: True
+      Size:
+        Fn::FindInMap:
+          - TypeToCapacity
+          - !Ref InstanceType
+          - RAM
+      VolumeType: gp2
+
+  ######################################################################
+  # DATA 1 DISK
+
+  ebsAseData1:
+    Type: AWS::EC2::Volume
+    Properties:
+      AvailabilityZone: !Ref AZ
+      Encrypted: True
+      Size: !FindInMap [ sapPaths, data1, staticSize ]
+      VolumeType: gp2
+
+  ######################################################################
+  # DATA2 DISK
+
+  ebsAseData2:
+    Type: AWS::EC2::Volume
+    Condition: 2Disks
+    Properties:
+      AvailabilityZone: !Ref AZ
+      Encrypted: True
+      Size: !FindInMap [ sapPaths, data2, staticSize ]
+      VolumeType: gp2
+
+  ######################################################################
+  # DATA3 DISK
+
+  ebsAseData3:
+    Type: AWS::EC2::Volume
+    Condition: 3Disks
+    Properties:
+      AvailabilityZone: !Ref AZ
+      Encrypted: True
+      Size: !FindInMap [ sapPaths, data3, staticSize ]
+      VolumeType: gp2
+
+  ######################################################################
+  # DATA4 DISK
+
+  ebsAseData4:
+    Type: AWS::EC2::Volume
+    Condition: 4Disks
+    Properties:
+      AvailabilityZone: !Ref AZ
+      Encrypted: True
+      Size: !FindInMap [ sapPaths, data4, staticSize ]
+      VolumeType: gp2
+
+  ######################################################################
+  #
+  # EBS ATTACHMENTS
+  #
+
+  ebsAttachAseSwap:
+    Type: AWS::EC2::VolumeAttachment
+    DependsOn:
+      - ec2Ase
+      - WCInstanceInit
+    Properties:
+      Device: /dev/xvdb
+      InstanceId: !Ref ec2Ase
+      VolumeId: !Ref ebsAseSwap
+
+  ebsAttachAseLog:
+    Type: AWS::EC2::VolumeAttachment
+    DependsOn:
+      - ec2Ase
+      - WCInstanceInit
+    Properties:
+      Device: !Sub
+        - '/dev/${ebsDisk}'
+        - ebsDisk: !FindInMap [sapPaths, log, ebsDisk]
+      InstanceId: !Ref ec2Ase
+      VolumeId: !Ref ebsAseLog
+
+  ebsAttachAseUsrSap:
+    Type: AWS::EC2::VolumeAttachment
+    DependsOn:
+      - ec2Ase
+      - WCInstanceInit
+    Properties:
+      Device: !Sub
+        - '/dev/${ebsDisk}'
+        - ebsDisk: !FindInMap [sapPaths, usrsap, ebsDisk]
+      InstanceId: !Ref ec2Ase
+      VolumeId: !Ref ebsAseUsrSap
+
+  ebsAttachAseBackup:
+    Type: AWS::EC2::VolumeAttachment
+    DependsOn:
+      - ec2Ase
+      - WCInstanceInit
+    Properties:
+      Device: !Sub
+        - '/dev/${ebsDisk}'
+        - ebsDisk: !FindInMap [sapPaths, backup, ebsDisk]
+      InstanceId: !Ref ec2Ase
+      VolumeId: !Ref ebsAseBackup
+
+  ebsAttachAseSapMnt:
+    Type: AWS::EC2::VolumeAttachment
+    DependsOn:
+      - ec2Ase
+      - WCInstanceInit
+    Properties:
+      Device: !Sub
+        - '/dev/${ebsDisk}'
+        - ebsDisk: !FindInMap [sapPaths, sapmnt, ebsDisk]
+      InstanceId: !Ref ec2Ase
+      VolumeId: !Ref ebsAseSapMnt
+
+  ### DATA DISKS ###
+
+  ebsAttachAseData1:
+    DependsOn:
+      - ec2Ase
+      - WCInstanceInit
+    Type: AWS::EC2::VolumeAttachment
+    Properties:
+      Device: !Sub
+        - '/dev/${ebsDisk}'
+        - ebsDisk: !FindInMap [sapPaths, data1, ebsDisk]
+      InstanceId: !Ref ec2Ase
+      VolumeId: !Ref ebsAseData1
+
+  ebsAttachAseData2:
+    DependsOn:
+      - ec2Ase
+      - WCInstanceInit
+    Condition: 2Disks
+    Type: AWS::EC2::VolumeAttachment
+    Properties:
+      Device: !Sub
+        - '/dev/${ebsDisk}'
+        - ebsDisk: !FindInMap [sapPaths, data2, ebsDisk]
+      InstanceId: !Ref ec2Ase
+      VolumeId: !Ref ebsAseData2
+
+  ebsAttachAseData3:
+    DependsOn:
+      - ec2Ase
+      - WCInstanceInit
+    Condition: 3Disks
+    Type: AWS::EC2::VolumeAttachment
+    Properties:
+      Device: !Sub
+        - '/dev/${ebsDisk}'
+        - ebsDisk: !FindInMap [sapPaths, data3, ebsDisk]
+      InstanceId: !Ref ec2Ase
+      VolumeId: !Ref ebsAseData3
+
+  ebsAttachAseData4:
+    DependsOn:
+      - ec2Ase
+      - WCInstanceInit
+    Condition: 4Disks
+    Type: AWS::EC2::VolumeAttachment
+    Properties:
+      Device: !Sub
+        - '/dev/${ebsDisk}'
+        - ebsDisk: !FindInMap [sapPaths, data4, ebsDisk]
+      InstanceId: !Ref ec2Ase
+      VolumeId: !Ref ebsAseData4
+
+  ##############################################################################
+  #
+  # WH and WC
+  #
+
+  WHInstanceInit:
+    Type: "AWS::CloudFormation::WaitConditionHandle"
+
+  WCInstanceInit:
+    Type: "AWS::CloudFormation::WaitCondition"
+    Properties:
+      Handle: !Ref WHInstanceInit
+      Timeout: "1800"
+
+  WHDisksGo:
+    Type: "AWS::CloudFormation::WaitConditionHandle"
+
+  WCDisksGo:
+    Type: "AWS::CloudFormation::WaitCondition"
+    Properties:
+      Handle: !Ref WHDisksGo
+      Timeout: "1800"
+
+
+################################################################################
+#
+# Outputs
+#
+################################################################################
+
+Outputs:
+  Instance:
+    Description: >-
+      Instance ID
+    Value: !Ref ec2Ase
